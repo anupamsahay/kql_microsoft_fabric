@@ -1,0 +1,237 @@
+// ===================================================================
+// MICROSOFT FABRIC COST OPTIMIZATION KQL QUERIES
+// ===================================================================
+
+// 1. CAPACITY UTILIZATION ANALYSIS
+// Monitor capacity usage patterns to identify optimization opportunities
+FabricCapacityEvents
+| where TimeGenerated >= ago(30d)
+| summarize 
+    TotalCU = sum(CapacityUnits),
+    AvgCU = avg(CapacityUnits),
+    MaxCU = max(CapacityUnits),
+    MinCU = min(CapacityUnits),
+    P95_CU = percentile(CapacityUnits, 95),
+    Count = count()
+    by bin(TimeGenerated, 1h), CapacityName, WorkspaceName
+| extend UtilizationPercent = (AvgCU / MaxCU) * 100
+| order by TimeGenerated desc
+
+// 2. EXPENSIVE OPERATIONS IDENTIFICATION
+// Find the most resource-intensive operations
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| where Status == "Success"
+| summarize 
+    TotalDuration = sum(DurationMs),
+    AvgDuration = avg(DurationMs),
+    TotalCU = sum(CapacityUnitsConsumed),
+    OperationCount = count()
+    by OperationType, WorkspaceName, UserPrincipalName
+| extend AvgCUPerOperation = TotalCU / OperationCount
+| order by TotalCU desc
+| take 50
+
+// 3. IDLE CAPACITY DETECTION
+// Identify periods of low utilization for potential cost savings
+FabricCapacityEvents
+| where TimeGenerated >= ago(30d)
+| summarize 
+    AvgUtilization = avg(CapacityUnits),
+    MaxUtilization = max(CapacityUnits)
+    by bin(TimeGenerated, 1h), CapacityName
+| where AvgUtilization < (MaxUtilization * 0.2) // Less than 20% utilized
+| summarize IdleHours = count() by CapacityName
+| extend PotentialSavingsHours = IdleHours
+| order by IdleHours desc
+
+// 4. WORKSPACE COST BREAKDOWN
+// Analyze costs by workspace to identify top consumers
+FabricActivityEvents
+| where TimeGenerated >= ago(30d)
+| summarize 
+    TotalOperations = count(),
+    TotalCU = sum(CapacityUnitsConsumed),
+    UniqueUsers = dcount(UserPrincipalName),
+    DistinctOperationTypes = dcount(OperationType)
+    by WorkspaceName, CapacityName
+| extend AvgCUPerOperation = TotalCU / TotalOperations
+| order by TotalCU desc
+
+// 5. PEAK VS OFF-PEAK USAGE ANALYSIS
+// Understand usage patterns for scheduling optimization
+FabricCapacityEvents
+| where TimeGenerated >= ago(30d)
+| extend Hour = hourofday(TimeGenerated)
+| extend IsPeakHour = iff(Hour >= 9 and Hour <= 17, "Peak", "Off-Peak")
+| summarize 
+    TotalCU = sum(CapacityUnits),
+    AvgCU = avg(CapacityUnits),
+    OperationCount = count()
+    by IsPeakHour, bin(TimeGenerated, 1d)
+| summarize 
+    PeakCU = sumif(TotalCU, IsPeakHour == "Peak"),
+    OffPeakCU = sumif(TotalCU, IsPeakHour == "Off-Peak")
+    by bin(TimeGenerated, 1d)
+| extend Ratio = PeakCU / (PeakCU + OffPeakCU) * 100
+
+// 6. FAILED OPERATIONS COST ANALYSIS
+// Calculate wasted resources on failed operations
+FabricActivityEvents
+| where TimeGenerated >= ago(30d)
+| where Status == "Failed" or Status == "Timeout"
+| summarize 
+    FailedCount = count(),
+    WastedCU = sum(CapacityUnitsConsumed),
+    AvgFailureDuration = avg(DurationMs)
+    by OperationType, WorkspaceName, ErrorCode
+| order by WastedCU desc
+
+// 7. USER ACTIVITY AND COST ATTRIBUTION
+// Identify top users by resource consumption
+FabricActivityEvents
+| where TimeGenerated >= ago(30d)
+| summarize 
+    TotalOperations = count(),
+    TotalCU = sum(CapacityUnitsConsumed),
+    UniqueWorkspaces = dcount(WorkspaceName),
+    AvgOperationDuration = avg(DurationMs)
+    by UserPrincipalName
+| extend AvgCUPerUser = TotalCU / TotalOperations
+| order by TotalCU desc
+| take 25
+
+// 8. SEMANTIC MODEL REFRESH OPTIMIZATION
+// Analyze refresh patterns and costs
+FabricActivityEvents
+| where OperationType in ("RefreshDataset", "RefreshDataflow", "RefreshSemanticModel")
+| where TimeGenerated >= ago(30d)
+| summarize 
+    RefreshCount = count(),
+    TotalCU = sum(CapacityUnitsConsumed),
+    AvgDuration = avg(DurationMs),
+    FailureRate = countif(Status == "Failed") * 100.0 / count()
+    by ItemName, WorkspaceName, bin(TimeGenerated, 1d)
+| extend AvgCUPerRefresh = TotalCU / RefreshCount
+| order by TotalCU desc
+
+// 9. CAPACITY THROTTLING EVENTS
+// Identify when capacity limits are reached
+FabricCapacityEvents
+| where TimeGenerated >= ago(30d)
+| where EventType == "Throttled" or CapacityState == "Throttled"
+| summarize 
+    ThrottleCount = count(),
+    ThrottleDuration = sum(DurationMs),
+    AffectedUsers = dcount(UserPrincipalName)
+    by CapacityName, bin(TimeGenerated, 1h)
+| order by ThrottleCount desc
+
+// 10. DAILY COST TREND ANALYSIS
+// Track daily consumption trends for forecasting
+FabricCapacityEvents
+| where TimeGenerated >= ago(90d)
+| summarize 
+    DailyCU = sum(CapacityUnits),
+    DailyOperations = count(),
+    UniqueUsers = dcount(UserPrincipalName)
+    by bin(TimeGenerated, 1d), CapacityName
+| order by TimeGenerated desc
+| extend MovingAvg7Day = row_avg(DailyCU, 7)
+
+// 11. ARTIFACT TYPE COST BREAKDOWN
+// Analyze costs by Fabric artifact type (Lakehouse, Warehouse, etc.)
+FabricActivityEvents
+| where TimeGenerated >= ago(30d)
+| summarize 
+    TotalCU = sum(CapacityUnitsConsumed),
+    OperationCount = count(),
+    AvgDuration = avg(DurationMs)
+    by ArtifactType, WorkspaceName
+| extend AvgCUPerArtifact = TotalCU / OperationCount
+| order by TotalCU desc
+
+// 12. QUERY PERFORMANCE OPTIMIZATION CANDIDATES
+// Identify slow queries that consume excessive resources
+FabricActivityEvents
+| where OperationType in ("ExecuteQuery", "QueryExecution")
+| where TimeGenerated >= ago(7d)
+| where DurationMs > 30000 // Queries longer than 30 seconds
+| summarize 
+    SlowQueryCount = count(),
+    TotalCU = sum(CapacityUnitsConsumed),
+    AvgDuration = avg(DurationMs),
+    MaxDuration = max(DurationMs)
+    by ItemName, UserPrincipalName
+| order by TotalCU desc
+| take 50
+
+// 13. CAPACITY SCALING RECOMMENDATIONS
+// Analyze if capacity is over or under-provisioned
+FabricCapacityEvents
+| where TimeGenerated >= ago(30d)
+| summarize 
+    P50 = percentile(CapacityUnits, 50),
+    P75 = percentile(CapacityUnits, 75),
+    P95 = percentile(CapacityUnits, 95),
+    P99 = percentile(CapacityUnits, 99),
+    Max = max(CapacityUnits),
+    ProvisionedCapacity = max(CapacityLimit)
+    by CapacityName
+| extend 
+    UtilizationP95 = (P95 / ProvisionedCapacity) * 100,
+    Recommendation = case(
+        UtilizationP95 < 40, "Consider downsizing",
+        UtilizationP95 > 80, "Consider upsizing",
+        "Optimal sizing"
+    )
+
+// 14. PAUSE/RESUME OPPORTUNITY ANALYSIS
+// Find capacities that could benefit from auto-pause
+FabricCapacityEvents
+| where TimeGenerated >= ago(30d)
+| extend Hour = hourofday(TimeGenerated)
+| summarize 
+    ActivityCount = count(),
+    TotalCU = sum(CapacityUnits)
+    by CapacityName, Hour
+| order by CapacityName, Hour asc
+| summarize 
+    InactiveHours = countif(ActivityCount == 0),
+    TotalHours = count()
+    by CapacityName
+| extend InactivePercent = (InactiveHours * 100.0) / TotalHours
+| where InactivePercent > 30
+| project CapacityName, InactiveHours, InactivePercent, 
+    PotentialSavings = strcat(round(InactivePercent, 1), "% capacity cost")
+
+// 15. COMPREHENSIVE COST SUMMARY DASHBOARD
+// Executive summary of all cost metrics
+FabricCapacityEvents
+| where TimeGenerated >= ago(30d)
+| summarize 
+    TotalCU = sum(CapacityUnits),
+    TotalOperations = count(),
+    UniqueWorkspaces = dcount(WorkspaceName),
+    UniqueUsers = dcount(UserPrincipalName),
+    AvgDailyUse = sum(CapacityUnits) / 30
+    by CapacityName
+| join kind=leftouter (
+    FabricActivityEvents
+    | where TimeGenerated >= ago(30d)
+    | where Status == "Failed"
+    | summarize FailedOps = count(), WastedCU = sum(CapacityUnitsConsumed)
+    by CapacityName
+) on CapacityName
+| extend 
+    FailureRate = round((FailedOps * 100.0) / TotalOperations, 2),
+    WastedCostPercent = round((WastedCU * 100.0) / TotalCU, 2)
+| project 
+    CapacityName,
+    TotalCU,
+    AvgDailyUse,
+    UniqueWorkspaces,
+    UniqueUsers,
+    FailureRate,
+    WastedCostPercent
+| order by TotalCU desc
