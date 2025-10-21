@@ -1,0 +1,504 @@
+// ===================================================================
+// MICROSOFT FABRIC - COMPLETE PROPERTIES DEEP DIVE KQL QUERIES
+// ===================================================================
+
+// 1. FABRIC CAPACITY - ALL PROPERTIES
+// Comprehensive view of all capacity properties and configurations
+FabricCapacityEvents
+| where TimeGenerated >= ago(7d)
+| extend 
+    Properties = parse_json(Properties),
+    AdditionalInfo = parse_json(AdditionalInfo)
+| project 
+    TimeGenerated,
+    CapacityId,
+    CapacityName,
+    CapacityState,
+    CapacitySKU,
+    Region,
+    SubscriptionId,
+    ResourceGroup,
+    TenantId,
+    CapacityUnits,
+    CapacityLimit,
+    CapacityUtilization = (CapacityUnits * 100.0) / CapacityLimit,
+    EventType,
+    Status,
+    Properties,
+    AdditionalInfo,
+    ResourceId,
+    OperationName,
+    CorrelationId,
+    Identity,
+    Level,
+    Location,
+    ResultType,
+    ResultSignature,
+    DurationMs,
+    CallerIpAddress,
+    SourceSystem,
+    Type
+| take 100
+
+// 2. FABRIC WORKSPACES - ALL PROPERTIES
+// Complete workspace metadata and configuration
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| distinct WorkspaceId, WorkspaceName, TenantId, CapacityId
+| join kind=leftouter (
+    FabricActivityEvents
+    | where TimeGenerated >= ago(7d)
+    | summarize 
+        TotalOperations = count(),
+        UniqueUsers = dcount(UserPrincipalName),
+        UniqueArtifacts = dcount(ItemId),
+        FirstActivity = min(TimeGenerated),
+        LastActivity = max(TimeGenerated),
+        OperationTypes = make_set(OperationType, 50)
+    by WorkspaceId
+) on WorkspaceId
+| project-reorder WorkspaceId, WorkspaceName, TenantId, CapacityId, TotalOperations, UniqueUsers, UniqueArtifacts
+
+// 3. FABRIC ARTIFACTS - ALL TYPES AND PROPERTIES
+// Detailed view of all Fabric artifacts (Lakehouses, Warehouses, Notebooks, etc.)
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    ItemId,
+    ItemName,
+    ItemType,
+    ArtifactType,
+    ArtifactKind,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    ApplicationName,
+    ClientRequestId,
+    CorrelationId,
+    Properties,
+    AdditionalProperties = parse_json(AdditionalProperties),
+    ResourceId,
+    SourceSystem,
+    DataflowId,
+    DataflowName,
+    SemanticModelId,
+    SemanticModelName,
+    ReportId,
+    ReportName,
+    PipelineId,
+    PipelineName,
+    NotebookId,
+    NotebookName,
+    LakehouseId,
+    LakehouseName,
+    WarehouseId,
+    WarehouseName,
+    Type
+| take 100
+
+// 4. LAKEHOUSE PROPERTIES - DETAILED
+// All properties specific to Fabric Lakehouses
+FabricActivityEvents
+| where ArtifactType == "Lakehouse" or ItemType == "Lakehouse"
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    LakehouseId,
+    LakehouseName,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    DataSize = Properties.DataSize,
+    FileCount = Properties.FileCount,
+    TableCount = Properties.TableCount,
+    StorageFormat = Properties.StorageFormat,
+    CompressionType = Properties.CompressionType,
+    PartitionCount = Properties.PartitionCount,
+    SchemaVersion = Properties.SchemaVersion,
+    Properties,
+    TenantId,
+    CorrelationId,
+    ClientRequestId
+| take 100
+
+// 5. DATA WAREHOUSE PROPERTIES - DETAILED
+// All properties specific to Fabric Data Warehouses
+FabricActivityEvents
+| where ArtifactType == "DataWarehouse" or ItemType == "Warehouse"
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    WarehouseId,
+    WarehouseName,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    QueryText = Properties.QueryText,
+    QueryType = Properties.QueryType,
+    RowsAffected = Properties.RowsAffected,
+    RowsRead = Properties.RowsRead,
+    DataProcessedMB = Properties.DataProcessedMB,
+    CacheHitRatio = Properties.CacheHitRatio,
+    ComputeTime = Properties.ComputeTime,
+    QueueTime = Properties.QueueTime,
+    Properties,
+    TenantId,
+    CorrelationId
+| take 100
+
+// 6. SEMANTIC MODELS (DATASETS) - ALL PROPERTIES
+// Complete semantic model/dataset properties
+FabricActivityEvents
+| where ArtifactType == "SemanticModel" or ItemType == "Dataset"
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    SemanticModelId,
+    SemanticModelName,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    RefreshType = Properties.RefreshType,
+    RefreshMode = Properties.RefreshMode,
+    RefreshStatus = Properties.RefreshStatus,
+    RowsProcessed = Properties.RowsProcessed,
+    TablesRefreshed = Properties.TablesRefreshed,
+    MemoryUsageMB = Properties.MemoryUsageMB,
+    StorageMode = Properties.StorageMode,
+    DataSourceType = Properties.DataSourceType,
+    ModelSize = Properties.ModelSize,
+    IsDirectQuery = Properties.IsDirectQuery,
+    Properties,
+    TenantId,
+    CorrelationId,
+    ErrorCode,
+    ErrorMessage
+| take 100
+
+// 7. REPORTS - ALL PROPERTIES
+// Complete report properties and metadata
+FabricActivityEvents
+| where ArtifactType == "Report" or ItemType == "Report"
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    ReportId,
+    ReportName,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    ReportType = Properties.ReportType,
+    VisualsCount = Properties.VisualsCount,
+    PagesCount = Properties.PagesCount,
+    DatasetId = Properties.DatasetId,
+    RenderingTime = Properties.RenderingTime,
+    QueryCount = Properties.QueryCount,
+    CacheHit = Properties.CacheHit,
+    ExportFormat = Properties.ExportFormat,
+    FilterApplied = Properties.FilterApplied,
+    Properties,
+    TenantId,
+    CorrelationId,
+    ClientRequestId,
+    ApplicationName
+| take 100
+
+// 8. NOTEBOOKS - ALL PROPERTIES
+// Complete notebook properties and execution details
+FabricActivityEvents
+| where ArtifactType == "Notebook" or ItemType == "Notebook"
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    NotebookId,
+    NotebookName,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    Language = Properties.Language,
+    SparkPoolId = Properties.SparkPoolId,
+    SparkPoolName = Properties.SparkPoolName,
+    ExecutorCount = Properties.ExecutorCount,
+    ExecutorSize = Properties.ExecutorSize,
+    DriverSize = Properties.DriverSize,
+    CellsExecuted = Properties.CellsExecuted,
+    OutputSizeMB = Properties.OutputSizeMB,
+    MemoryUsageGB = Properties.MemoryUsageGB,
+    CPUUtilization = Properties.CPUUtilization,
+    Properties,
+    TenantId,
+    CorrelationId,
+    SessionId
+| take 100
+
+// 9. DATA PIPELINES - ALL PROPERTIES
+// Complete data pipeline properties and execution details
+FabricActivityEvents
+| where ArtifactType == "DataPipeline" or ItemType == "Pipeline"
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    PipelineId,
+    PipelineName,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    RunId = Properties.RunId,
+    TriggerType = Properties.TriggerType,
+    TriggerName = Properties.TriggerName,
+    ActivityCount = Properties.ActivityCount,
+    SucceededActivities = Properties.SucceededActivities,
+    FailedActivities = Properties.FailedActivities,
+    RowsCopied = Properties.RowsCopied,
+    DataReadMB = Properties.DataReadMB,
+    DataWrittenMB = Properties.DataWrittenMB,
+    ParallelCopies = Properties.ParallelCopies,
+    Properties,
+    TenantId,
+    CorrelationId,
+    ErrorCode,
+    ErrorMessage
+| take 100
+
+// 10. DATAFLOWS - ALL PROPERTIES
+// Complete dataflow properties and refresh details
+FabricActivityEvents
+| where ArtifactType == "Dataflow" or ItemType == "Dataflow"
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    DataflowId,
+    DataflowName,
+    WorkspaceId,
+    WorkspaceName,
+    CapacityId,
+    OperationType,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    UserPrincipalName,
+    RefreshType = Properties.RefreshType,
+    EntitiesRefreshed = Properties.EntitiesRefreshed,
+    RowsProcessed = Properties.RowsProcessed,
+    DataSourceType = Properties.DataSourceType,
+    ComputeEngine = Properties.ComputeEngine,
+    MemoryUsageMB = Properties.MemoryUsageMB,
+    Properties,
+    TenantId,
+    CorrelationId,
+    ErrorCode,
+    ErrorMessage
+| take 100
+
+// 11. USER ACTIVITY - ALL PROPERTIES
+// Complete user activity and identity properties
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| extend Identity = parse_json(Identity)
+| project 
+    TimeGenerated,
+    UserPrincipalName,
+    UserId = Identity.UserId,
+    UserType = Identity.UserType,
+    UserRole = Identity.UserRole,
+    ApplicationId = Identity.ApplicationId,
+    ApplicationName,
+    ClientRequestId,
+    ClientIP = CallerIpAddress,
+    UserAgent,
+    SessionId,
+    TenantId,
+    WorkspaceId,
+    WorkspaceName,
+    OperationType,
+    ItemType,
+    ItemName,
+    Status,
+    DurationMs,
+    CapacityUnitsConsumed,
+    CorrelationId,
+    Identity
+| take 100
+
+// 12. OPERATIONS - ALL TYPES AND PROPERTIES
+// Comprehensive view of all operation types with their properties
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| summarize 
+    OperationCount = count(),
+    AvgDuration = avg(DurationMs),
+    MaxDuration = max(DurationMs),
+    TotalCU = sum(CapacityUnitsConsumed),
+    AvgCU = avg(CapacityUnitsConsumed),
+    SuccessRate = countif(Status == "Success") * 100.0 / count(),
+    UniqueUsers = dcount(UserPrincipalName),
+    UniqueWorkspaces = dcount(WorkspaceId),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated),
+    SampleProperties = any(Properties)
+    by OperationType, ArtifactType, ItemType
+| order by OperationCount desc
+
+// 13. CAPACITY METRICS - TIME SERIES
+// Detailed time-series view of capacity metrics
+FabricCapacityEvents
+| where TimeGenerated >= ago(7d)
+| extend Properties = parse_json(Properties)
+| project 
+    TimeGenerated,
+    CapacityId,
+    CapacityName,
+    CapacitySKU,
+    CapacityUnits,
+    CapacityLimit,
+    CapacityState,
+    EventType,
+    BackgroundPercentage = Properties.BackgroundPercentage,
+    InteractivePercentage = Properties.InteractivePercentage,
+    ThrottlingPercentage = Properties.ThrottlingPercentage,
+    OveragePercentage = Properties.OveragePercentage,
+    RejectionsCount = Properties.RejectionsCount,
+    ActiveOperations = Properties.ActiveOperations,
+    QueuedOperations = Properties.QueuedOperations,
+    Properties,
+    TenantId,
+    Region,
+    SubscriptionId,
+    ResourceGroup
+| order by TimeGenerated desc
+| take 1000
+
+// 14. ERRORS AND EXCEPTIONS - ALL DETAILS
+// Complete error details across all operations
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| where Status in ("Failed", "Error", "Timeout", "Cancelled")
+| extend 
+    Properties = parse_json(Properties),
+    ErrorDetails = parse_json(ErrorDetails)
+| project 
+    TimeGenerated,
+    OperationType,
+    ItemType,
+    ItemName,
+    WorkspaceName,
+    CapacityName,
+    Status,
+    ErrorCode,
+    ErrorMessage,
+    ErrorType = ErrorDetails.ErrorType,
+    ErrorSource = ErrorDetails.ErrorSource,
+    ErrorStackTrace = ErrorDetails.StackTrace,
+    InnerError = ErrorDetails.InnerError,
+    UserPrincipalName,
+    DurationMs,
+    CapacityUnitsConsumed,
+    Properties,
+    ErrorDetails,
+    CorrelationId,
+    ClientRequestId,
+    TenantId
+| order by TimeGenerated desc
+| take 100
+
+// 15. RESOURCE HIERARCHY - COMPLETE VIEW
+// Shows the complete hierarchy: Tenant > Capacity > Workspace > Items
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| summarize 
+    UniqueItems = dcount(ItemId),
+    ItemTypes = make_set(ItemType, 20),
+    Operations = count(),
+    TotalCU = sum(CapacityUnitsConsumed),
+    UniqueUsers = dcount(UserPrincipalName)
+    by TenantId, CapacityId, CapacityName, WorkspaceId, WorkspaceName
+| order by TotalCU desc
+
+// 16. ALL PROPERTIES COMPREHENSIVE DUMP
+// Get absolutely everything - use for exploration
+FabricActivityEvents
+| where TimeGenerated >= ago(1d)
+| extend 
+    AllProperties = bag_pack_columns(*),
+    ParsedProperties = parse_json(Properties),
+    ParsedAdditionalInfo = parse_json(AdditionalProperties)
+| project TimeGenerated, AllProperties, ParsedProperties, ParsedAdditionalInfo
+| take 10
+
+// 17. SCHEMA EXPLORATION
+// Discover all available columns and their data types
+FabricActivityEvents
+| getschema 
+| project ColumnName, ColumnOrdinal, DataType, ColumnType
+| order by ColumnOrdinal
+
+// 18. CAPACITY PROPERTIES - COMPLETE SCHEMA
+FabricCapacityEvents
+| getschema 
+| project ColumnName, ColumnOrdinal, DataType, ColumnType
+| order by ColumnOrdinal
+
+// 19. DISTINCT VALUES ANALYSIS
+// Find all distinct values for key categorical fields
+FabricActivityEvents
+| where TimeGenerated >= ago(7d)
+| summarize 
+    UniqueOperationTypes = make_set(OperationType, 100),
+    UniqueItemTypes = make_set(ItemType, 100),
+    UniqueArtifactTypes = make_set(ArtifactType, 100),
+    UniqueStatuses = make_set(Status, 50),
+    UniqueEventTypes = make_set(EventType, 50),
+    TotalRecords = count()
+
+// 20. CUSTOM PROPERTIES EXTRACTION
+// Extract and parse all custom properties from JSON fields
+FabricActivityEvents
+| where TimeGenerated >= ago(1d)
+| where isnotempty(Properties)
+| extend PropertiesJson = parse_json(Properties)
+| evaluate bag_unpack(PropertiesJson, columnsConflict='replace_source')
+| take 100
